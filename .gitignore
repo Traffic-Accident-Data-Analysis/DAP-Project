@@ -1,2 +1,9 @@
+# Chặn thư mục data (vì nặng)
 data/
-*.csv
+
+# Chặn thư mục output (vì ai chạy code cũng tự sinh ra được)
+output/
+
+# Chặn các file rác hệ thống (để git sạch đẹp)
+__pycache__/
+.ipynb_checkpoints/
