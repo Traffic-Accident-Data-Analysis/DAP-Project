@@ -7,3 +7,5 @@ output/
 # Chặn các file rác hệ thống (để git sạch đẹp)
 __pycache__/
 .ipynb_checkpoints/
+*.csv
+output/
