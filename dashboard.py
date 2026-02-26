@@ -7,7 +7,7 @@ import plotly.express as px
 # 1️⃣ LOAD DATA (KHỚP 100% VỚI DATA THỰC TẾ)
 # =========================================
 
-file_path = r"D:\FPT\Spring 2026\DAP391m\DAP-Project\output\dashboard_data.csv"
+file_path = r"C:\Users\Admin\Desktop\DAP_Project\output\dashboard_data.csv"
 
 # Các cột lấy trực tiếp từ file của bạn
 cols_to_keep = [
