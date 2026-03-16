@@ -4,57 +4,90 @@ from dash import dcc, html, Input, Output, callback_context
 import plotly.express as px
 
 # =========================================
-# 1️⃣ LOAD DATA (KHỚP 100% VỚI DATA THỰC TẾ)
+# 1. LOAD DATA (TỐI ƯU HÓA & QUY ĐỔI ĐẠI LƯỢNG)
 # =========================================
 
-file_path = r"C:\Users\Admin\Desktop\DAP_Project\output\dashboard_data.csv"
+file_path = r"D:\FPT\Spring 2026\DAP391m\DAP-Project\output\dashboard_data.csv"
 
-# Các cột lấy trực tiếp từ file của bạn
 cols_to_keep = [
-    'Severity', 'Start_Lat', 'Start_Lng', 'City',
-    'Temperature(F)', 'Weather_Condition',
-    'Junction', 'Traffic_Signal', 'Sunrise_Sunset',
-    'Hour', 'Month', 'Year', 'Weekday'
+    'Severity', 'Start_Lat', 'Start_Lng', 'Distance(mi)', 'City', 'State',
+    'Temperature(F)', 'Humidity(%)', 'Visibility(mi)', 'Precipitation(in)',
+    'Weather_Condition', 'Junction', 'Traffic_Signal', 'Sunrise_Sunset',
+    'Hour', 'Day', 'Month', 'Year', 'Weekday', 'Duration'
 ]
 
-chunksize = 300000
-sample_data = []
-
-print("⏳ Loading dataset...")
-
-for chunk in pd.read_csv(file_path, usecols=cols_to_keep, chunksize=chunksize):
-    sample_data.append(chunk.sample(frac=0.015, random_state=42))
-
-df_sample = pd.concat(sample_data, ignore_index=True)
-df_sample = df_sample.dropna(subset=['Start_Lat', 'Start_Lng', 'Year', 'Month', 'Hour'])
-
-# Reset index để tạo ID liền mạch
-df_sample = df_sample.reset_index(drop=True)
-df_sample["Accident_ID"] = df_sample.index.astype(int)
-
-# Đảm bảo các cột thời gian là số nguyên
-df_sample['Year'] = df_sample['Year'].astype(int)
-df_sample['Month'] = df_sample['Month'].astype(int)
-df_sample['Hour'] = df_sample['Hour'].astype(int)
-
-# Dịch số Weekday (0-6) sang Tên thứ trong tuần
-day_mapping = {
-    0.0: 'Monday', 1.0: 'Tuesday', 2.0: 'Wednesday', 
-    3.0: 'Thursday', 4.0: 'Friday', 5.0: 'Saturday', 6.0: 'Sunday'
+dtypes_optimized = {
+    'Severity': 'int8',
+    'Start_Lat': 'float32',
+    'Start_Lng': 'float32',
+    'Distance(mi)': 'float32',
+    'City': 'category',
+    'State': 'category',
+    'Temperature(F)': 'float32',
+    'Humidity(%)': 'float32',
+    'Visibility(mi)': 'float32',
+    'Precipitation(in)': 'float32',
+    'Weather_Condition': 'category',
+    'Sunrise_Sunset': 'category',
+    'Duration': 'float32'
 }
-df_sample['Day_of_Week'] = df_sample['Weekday'].map(day_mapping)
-df_sample['Year_Month'] = df_sample['Year'].astype(str) + '-' + df_sample['Month'].astype(str).str.zfill(2)
 
-available_years = sorted(df_sample["Year"].dropna().unique())
+chunksize = 500000
+data_chunks = []
 
-print("✅ Data Ready")
+print("⏳ Loading full dataset (7.7 million rows)... Please wait.")
+
+for chunk in pd.read_csv(file_path, usecols=cols_to_keep, dtype=dtypes_optimized, chunksize=chunksize):
+    # Quy đổi đại lượng
+    if 'Temperature(F)' in chunk.columns:
+        chunk['Temperature(C)'] = (chunk['Temperature(F)'] - 32) * 5.0 / 9.0
+        chunk = chunk.drop(columns=['Temperature(F)'])
+    if 'Distance(mi)' in chunk.columns:
+        chunk['Distance(km)'] = chunk['Distance(mi)'] * 1.60934
+        chunk = chunk.drop(columns=['Distance(mi)'])
+    if 'Visibility(mi)' in chunk.columns:
+        chunk['Visibility(km)'] = chunk['Visibility(mi)'] * 1.60934
+        chunk = chunk.drop(columns=['Visibility(mi)'])
+    if 'Precipitation(in)' in chunk.columns:
+        chunk['Precipitation(mm)'] = chunk['Precipitation(in)'] * 25.4
+        chunk = chunk.drop(columns=['Precipitation(in)'])
+    
+    data_chunks.append(chunk)
+
+df_full = pd.concat(data_chunks, ignore_index=True)
+
+# Làm sạch dữ liệu cơ bản
+df_full = df_full.dropna(subset=['Start_Lat', 'Start_Lng', 'Year', 'Month', 'Day', 'Hour', 'City'])
+df_full = df_full.reset_index(drop=True)
+df_full["Accident_ID"] = df_full.index.astype(int)
+
+# Ép kiểu dữ liệu
+df_full['Year'] = df_full['Year'].astype('int16')
+df_full['Month'] = df_full['Month'].astype('int8')
+df_full['Day'] = df_full['Day'].astype('int8')
+df_full['Hour'] = df_full['Hour'].astype('int8')
+df_full['Weekday'] = df_full['Weekday'].astype('int8')
+df_full['Junction'] = df_full['Junction'].fillna(False).astype(bool)
+df_full['Traffic_Signal'] = df_full['Traffic_Signal'].fillna(False).astype(bool)
+
+day_mapping = {
+    0: 'Monday', 1: 'Tuesday', 2: 'Wednesday', 
+    3: 'Thursday', 4: 'Friday', 5: 'Saturday', 6: 'Sunday'
+}
+df_full['Day_of_Week'] = df_full['Weekday'].map(day_mapping).astype('category')
+df_full['Year_Month'] = df_full['Year'].astype(str) + '-' + df_full['Month'].astype(str).str.zfill(2)
+df_full['Year_Month'] = df_full['Year_Month'].astype('category')
+
+available_years = sorted(df_full["Year"].unique())
+
+print(f"✅ Data Ready: Loaded {len(df_full):,} rows successfully!")
 
 # =========================================
-# 2️⃣ DASH APP
+# 2. DASH APP LAYOUT
 # =========================================
 
 app = dash.Dash(__name__)
-app.title = "US Accidents Professional Dashboard"
+app.title = "US Accidents Dashboard"
 
 px.defaults.template = "plotly_dark"
 px.defaults.color_continuous_scale = px.colors.sequential.Plasma
@@ -68,230 +101,218 @@ CARD_STYLE = {
 
 app.layout = html.Div([
 
-    html.H1("US Accidents Dashboard",
-            style={'textAlign':'center','marginBottom':'20px'}),
+    html.H1("US Accidents Dashboard", style={'textAlign':'center','marginBottom':'20px'}),
 
-    # ================= MAP SECTION =================
+    # --- MAP 1: TỌA ĐỘ CHI TIẾT ---
     html.Div([
         html.H3("Accident Map"),
-
         dcc.RadioItems(
             id='map-type',
-            options=[
-                {'label': ' Scatter Map', 'value': 'scatter'},
-                {'label': ' Heatmap', 'value': 'heat'}
-            ],
-            value='scatter',
-            inline=True,
-            style={'marginBottom':'10px'}
+            options=[{'label': ' Scatter Map', 'value': 'scatter'}, {'label': ' Heatmap', 'value': 'heat'}],
+            value='scatter', inline=True, style={'marginBottom':'10px'}
         ),
-
-        dcc.Graph(
-            id='map-graph',
-            config={'scrollZoom': True, 'doubleClick': 'reset'},
-            style={"height":"600px"}
-        ),
-
+        dcc.Graph(id='map-graph', config={'scrollZoom': True}, style={"height":"550px", "marginBottom":"10px"}),
         html.Div([
-            dcc.Dropdown(
-                id='year-filter',
-                options=[{'label': str(y), 'value': y} for y in available_years],
-                placeholder="Select Year",
-                style={'width':'200px', 'color':'black'}
-            ),
+            dcc.Dropdown(id='year-filter', options=[{'label': str(y), 'value': y} for y in available_years],
+                         placeholder="Select Year", style={'width':'200px', 'color':'black'}),
+            html.Button("Reset Filters", id="reset-btn", style={
+                'padding':'8px 18px', 'backgroundColor':'#ff4d4f', 'color':'white',
+                'border':'none', 'borderRadius':'8px', 'cursor':'pointer'
+            })
+        ], style={'display':'flex','gap':'15px'})
+    ], style={**CARD_STYLE, "marginBottom": "20px"}),
 
-            html.Button(
-                "Reset Filters",
-                id="reset-btn",
-                style={
-                    'padding':'8px 18px',
-                    'backgroundColor':'#ff4d4f',
-                    'color':'white',
-                    'border':'none',
-                    'borderRadius':'8px',
-                    'cursor':'pointer'
-                }
-            )
-        ], style={'display':'flex','gap':'15px','marginTop':'10px'})
-
-    ], style=CARD_STYLE),
-
-    html.Br(),
-
-    # ================= FILTER =================
+    # --- MAP 2: BẢN ĐỒ THÀNH PHỐ  ---
     html.Div([
-        html.Label("Filter by Severity"),
+        html.H3("City Aggregated Map"),
+        dcc.Graph(id='map-graph-2', config={'scrollZoom': True}, style={"height":"600px", "marginBottom":"10px"}),
+        html.Div([
+            dcc.Dropdown(id='year-filter-2', options=[{'label': str(y), 'value': y} for y in available_years],
+                         placeholder="Select Year", style={'width':'200px', 'color':'black'}),
+            html.Button("Reset Map 2", id="reset-btn-2", style={
+                'padding':'8px 18px', 'backgroundColor':'#3498DB', 'color':'white',
+                'border':'none', 'borderRadius':'8px', 'cursor':'pointer'
+            })
+        ], style={'display':'flex','gap':'15px'})
+    ], style={**CARD_STYLE, "marginBottom": "20px"}),
+
+    # --- BỘ LỌC CHUNG CHO CHARTS ---
+    html.Div([
+        html.Label("Severity"),
         dcc.Dropdown(
             id='severity-filter',
-            options=[{'label': str(s), 'value': s}
-                     for s in sorted(df_sample['Severity'].unique())],
-            multi=True,
-            style={'color':'black'}
+            options=[{'label': f"Severity {s}", 'value': s} for s in sorted(df_full['Severity'].unique())],
+            multi=True, style={'color':'black'}
         )
-    ], style={**CARD_STYLE, "width":"40%","margin":"auto"}),
+    ], style={**CARD_STYLE, "width":"40%", "margin":"auto", "marginBottom": "20px"}),
 
-    html.Br(),
-
-    # ================= CHART GRID =================
+    # --- LƯỚI BIỂU ĐỒ ---
     html.Div([
         html.Div(dcc.Graph(id='time-trend-graph'), style={"gridColumn": "1 / -1", **CARD_STYLE}), 
-
         html.Div(dcc.Graph(id='day-graph'), style=CARD_STYLE),
+        html.Div(dcc.Graph(id='day-month-graph'), style=CARD_STYLE), 
         html.Div(dcc.Graph(id='hour-sun-graph'), style=CARD_STYLE), 
-        
+        html.Div(dcc.Graph(id='duration-graph'), style=CARD_STYLE),  
         html.Div(dcc.Graph(id='weather-graph'), style=CARD_STYLE),
         html.Div(dcc.Graph(id='severity-graph'), style=CARD_STYLE),
-        
         html.Div(dcc.Graph(id='city-graph'), style=CARD_STYLE),
         html.Div(dcc.Graph(id='infra-graph'), style=CARD_STYLE),
+        html.Div(dcc.Graph(id='humidity-graph'), style=CARD_STYLE),  
+        html.Div(dcc.Graph(id='visibility-graph'), style=CARD_STYLE),
+        html.Div(dcc.Graph(id='precip-graph'), style={"gridColumn": "1 / -1", **CARD_STYLE}), 
+    ], style={"display":"grid", "gridTemplateColumns":"1fr 1fr", "gap":"20px"}),
 
-    ], style={
-        "display":"grid",
-        "gridTemplateColumns":"1fr 1fr",
-        "gap":"20px"
-    }),
-
-], style={
-    "backgroundColor":"#0a0f18", 
-    "padding":"20px",
-    "color":"white"
-})
+], style={"backgroundColor":"#4174AB", "padding":"20px", "color":"white"})
 
 # =========================================
-# 3️⃣ CALLBACK
+# 3. CALLBACKS
 # =========================================
+
+@app.callback(Output('year-filter', 'value'), Input('reset-btn', 'n_clicks'), prevent_initial_call=True)
+def reset_map1_year(n): return None
+
+@app.callback(Output('year-filter-2', 'value'), Input('reset-btn-2', 'n_clicks'), prevent_initial_call=True)
+def reset_map2_year(n): return None
+
+@app.callback(Output('map-graph-2', 'figure'), Input('year-filter-2', 'value'))
+def update_aggregated_map(year_filter_2):
+    filtered_2 = df_full.copy()
+    if year_filter_2:
+        filtered_2 = filtered_2[filtered_2['Year'] == year_filter_2]
+
+    city_agg = filtered_2.groupby('City', observed=True).agg(
+        Total_Accidents=('Severity', 'size'),
+        Avg_Severity=('Severity', 'mean'),
+        Lat=('Start_Lat', 'mean'), Lng=('Start_Lng', 'mean')
+    ).reset_index()
+    city_agg = city_agg[city_agg['Total_Accidents'] > 0]
+
+    fig_map2 = px.scatter_map(
+        city_agg, lat="Lat", lon="Lng", size="Total_Accidents", color="Avg_Severity",
+        hover_name="City", hover_data={"Total_Accidents": ":,", "Avg_Severity": ":.2f", "Lat": False, "Lng": False},
+        size_max=50, opacity=0.7, color_continuous_scale="Reds", height=600, 
+        map_style="open-street-map", center=dict(lat=39.8283, lon=-98.5795)
+    )
+    fig_map2.update_layout(margin={"r":0,"t":40,"l":0,"b":0}, uirevision="map2")
+    return fig_map2
 
 @app.callback(
     [
-        Output('time-trend-graph', 'figure'),
-        Output('day-graph', 'figure'),
-        Output('hour-sun-graph', 'figure'),
-        Output('weather-graph', 'figure'),
-        Output('severity-graph', 'figure'),
-        Output('city-graph', 'figure'),
-        Output('infra-graph', 'figure'),
-        Output('map-graph', 'figure'),
+        Output('map-graph', 'figure'), Output('time-trend-graph', 'figure'), 
+        Output('day-graph', 'figure'), Output('day-month-graph', 'figure'), 
+        Output('hour-sun-graph', 'figure'), Output('duration-graph', 'figure'), 
+        Output('weather-graph', 'figure'), Output('severity-graph', 'figure'), 
+        Output('city-graph', 'figure'), Output('infra-graph', 'figure'), 
+        Output('humidity-graph', 'figure'), Output('visibility-graph', 'figure'), 
+        Output('precip-graph', 'figure')
     ],
     [
-        Input('weather-graph', 'clickData'),
-        Input('infra-graph', 'clickData'),
-        Input('map-graph', 'clickData'),
-        Input('severity-filter', 'value'),
-        Input('map-type', 'value'),
-        Input('reset-btn', 'n_clicks'),
-        Input('year-filter', 'value')
+        Input('map-type', 'value'), Input('year-filter', 'value'), Input('severity-filter', 'value'),
+        # Bắt sự kiện Click từ TẤT CẢ các biểu đồ
+        Input('map-graph', 'clickData'), Input('weather-graph', 'clickData'), 
+        Input('infra-graph', 'clickData'), Input('city-graph', 'clickData'),
+        Input('day-graph', 'clickData'), Input('day-month-graph', 'clickData'),
+        Input('time-trend-graph', 'clickData'), Input('severity-graph', 'clickData')
     ]
 )
-def update_dashboard(weather_click, infra_click, map_click,
-                     severity_filter, map_type, reset_click, year_filter):
-
+def update_dashboard(map_type, year_filter, severity_filter, 
+                     map_click, weather_click, infra_click, city_click, 
+                     day_click, day_month_click, trend_click, sev_click):
     try:
         ctx = callback_context
         triggered = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else None
 
-        filtered = df_sample.copy()
+        filtered = df_full.copy()
 
-        if triggered != "reset-btn":
-            if year_filter:
-                filtered = filtered[filtered["Year"] == year_filter]
+        # Áp dụng bộ lọc Dropdown
+        if year_filter: 
+            filtered = filtered[filtered["Year"] == year_filter]
+        if severity_filter: 
+            filtered = filtered[filtered['Severity'].isin(severity_filter)]
+            
+        # Áp dụng bộ lọc theo Cú Click (Cross-filtering)
+        if triggered == 'weather-graph' and weather_click:
+            filtered = filtered[filtered['Weather_Condition'] == weather_click['points'][0]['x']]
+            
+        elif triggered == 'infra-graph' and infra_click:
+            selected_type = infra_click['points'][0]['x']
+            filtered = filtered[filtered[selected_type] == True]
+            
+        elif triggered == 'city-graph' and city_click:
+            filtered = filtered[filtered['City'] == city_click['points'][0]['x']]
+            
+        elif triggered == 'day-graph' and day_click:
+            filtered = filtered[filtered['Day_of_Week'] == day_click['points'][0]['x']]
+            
+        elif triggered == 'day-month-graph' and day_month_click:
+            filtered = filtered[filtered['Day'] == day_month_click['points'][0]['x']]
+            
+        elif triggered == 'time-trend-graph' and trend_click:
+            filtered = filtered[filtered['Year_Month'] == trend_click['points'][0]['x']]
+            
+        elif triggered == 'severity-graph' and sev_click:
+            filtered = filtered[filtered['Severity'] == sev_click['points'][0]['x']]
+            
+        elif triggered == "map-graph" and map_click:
+            custom_data = map_click['points'][0].get('customdata')
+            if custom_data is not None:
+                filtered = filtered[filtered['Accident_ID'] == int(custom_data[0])]
 
-            if severity_filter:
-                filtered = filtered[filtered['Severity'].isin(severity_filter)]
+        if filtered.empty: 
+            filtered = df_full.copy()
 
-            if weather_click and triggered == 'weather-graph':
-                filtered = filtered[filtered['Weather_Condition'] == weather_click['points'][0]['x']]
-
-            if infra_click and triggered == 'infra-graph':
-                selected_type = infra_click['points'][0]['x']
-                filtered = filtered[filtered[selected_type] == True]
-
-            # ===== LOGIC BẮT CLICK BẢN ĐỒ (ĐÃ FIX CHUẨN) =====
-            if map_click and triggered == "map-graph":
-                point_data = map_click['points'][0]
-                custom_data = point_data.get('customdata')
-                
-                if custom_data is not None:
-                    # Plotly lưu custom_data ở index 0, hover_data theo sau. 
-                    # Ép kiểu int để so sánh chính xác với cột Accident_ID dạng int
-                    accident_id = int(custom_data[0]) 
-                    filtered = filtered[filtered['Accident_ID'] == accident_id]
-
-        if filtered.empty:
-            filtered = df_sample.copy()
-
-        # ===== 1. Xu Hướng Theo Thời Gian =====
-        trend_df = filtered.groupby('Year_Month').size().reset_index(name='Count')
+        # --- BIỂU ĐỒ XU HƯỚNG THỜI GIAN ---
+        trend_df = filtered.groupby('Year_Month', observed=True).size().reset_index(name='Count')
         trend_df = trend_df.sort_values('Year_Month')
-        fig_trend = px.line(trend_df, x='Year_Month', y='Count',
-                            title="Accidents Trend Over Time",
-                            markers=True)
-        fig_trend.update_xaxes(type='category', tickangle=45) 
+        fig_trend = px.line(trend_df, x='Year_Month', y='Count', title="Accidents Trend", markers=True)
+        fig_trend.update_xaxes(type='category', tickangle=45)
 
-        # ===== 2. Thứ trong tuần =====
+        # --- CÁC BIỂU ĐỒ CÒN LẠI ---
         days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
         day_df = filtered['Day_of_Week'].value_counts().reindex(days_order).reset_index()
         day_df.columns = ['Day_of_Week', 'Count']
-        fig_day = px.bar(day_df, x='Day_of_Week', y='Count', 
-                         title="Accidents by Day of Week", 
-                         color='Count', color_continuous_scale='Plasma')
+        fig_day = px.bar(day_df, x='Day_of_Week', y='Count', title="Accidents by Day of Week", color='Count')
 
-        # ===== 3. Giờ trong ngày vs Day/Night =====
-        fig_hour_sun = px.histogram(filtered, x='Hour', color='Sunrise_Sunset', nbins=24,
-                                    title="Accidents by 24h & Day/Night Phase",
-                                    barmode='stack', 
-                                    color_discrete_map={'Day': '#F39C12', 'Night': '#34495E'}) 
-        fig_hour_sun.update_xaxes(dtick=1) 
-
-        # ===== 4. Các biểu đồ khác =====
+        fig_hour_sun = px.histogram(filtered, x='Hour', color='Sunrise_Sunset', nbins=24, title="Accidents by Day/Night", barmode='stack').update_xaxes(dtick=1) 
         fig_sev = px.histogram(filtered, x='Severity', color='Severity', title="Severity Distribution")
+        
+        top_cities = filtered['City'].value_counts().nlargest(20).index
+        fig_city = px.histogram(filtered[filtered['City'].isin(top_cities)], x='City', title="Top Cities").update_xaxes(categoryorder='total descending') 
 
-        fig_city = px.histogram(filtered, x='City', title="Top Cities")
-        fig_city.update_xaxes(categoryorder='total descending', range=[-.5, 19.5]) 
+        top_weather = filtered['Weather_Condition'].value_counts().nlargest(15).index
+        fig_weather = px.histogram(filtered[filtered['Weather_Condition'].isin(top_weather)], x='Weather_Condition', title="Top Weather Conditions").update_xaxes(categoryorder='total descending')
 
-        fig_weather = px.histogram(filtered, x='Weather_Condition', title="Weather Conditions").update_xaxes(categoryorder='total descending', range=[-.5, 14.5])
+        fig_infra = px.bar(pd.DataFrame({"Type": ["Junction", "Traffic_Signal"], "Count": [filtered['Junction'].sum(), filtered['Traffic_Signal'].sum()]}), x='Type', y='Count', title="Infrastructure Analysis")
 
-        infra_df = pd.DataFrame({
-            "Type": ["Junction", "Traffic_Signal"],
-            "Count": [
-                filtered['Junction'].fillna(False).sum(),
-                filtered['Traffic_Signal'].fillna(False).sum()
-            ]
-        })
-        fig_infra = px.bar(infra_df, x='Type', y='Count', title="Infrastructure Analysis")
+        day_m_df = filtered['Day'].value_counts().sort_index().reset_index()
+        day_m_df.columns = ['Day_of_Month', 'Count']
+        fig_day_month = px.bar(day_m_df, x='Day_of_Month', y='Count', title="Accidents by Day of Month", color='Count').update_xaxes(dtick=1)
 
-        # ===== 5. MAP =====
-        map_data = filtered
-        if len(map_data) > 50000:
-            map_data = map_data.sample(50000, random_state=42)
-            
+        dur_filtered = filtered[filtered['Duration'] <= 1440]
+        fig_duration = px.histogram(dur_filtered, x='Duration', nbins=30, title="Duration Distribution (Minutes)")
+
+        fig_humidity = px.histogram(filtered, x='Humidity(%)', nbins=20, title="Humidity (%)")
+        fig_visibility = px.histogram(filtered, x='Visibility(km)', nbins=20, title="Visibility (km)", log_y=True)
+        
+        rain_filtered = filtered[filtered['Precipitation(mm)'] > 0]
+        fig_precip = px.histogram(rain_filtered, x='Precipitation(mm)', nbins=30, title="Precipitation", log_y=True)
+
+        # --- MAP 1 ---
+        map_data = filtered.sample(50000, random_state=42) if len(filtered) > 50000 else filtered
         center_us = dict(lat=39.8283, lon=-98.5795)
         
         if map_type == 'scatter':
-            fig_map = px.scatter_map(
-                map_data, lat="Start_Lat", lon="Start_Lng",
-                color="Severity", hover_name="City", hover_data=["Weather_Condition"], custom_data=["Accident_ID"],
-                height=600, map_style="open-street-map", center=center_us 
-            )
+            fig_map1 = px.scatter_map(map_data, lat="Start_Lat", lon="Start_Lng", color="Severity", hover_name="City", hover_data={"Weather_Condition": True, "Temperature(C)": ":.1f", "Distance(km)": ":.2f"}, custom_data=["Accident_ID"], height=550, map_style="open-street-map", center=center_us)
         else:
-            fig_map = px.density_map(
-                map_data, lat='Start_Lat', lon='Start_Lng', z='Severity',
-                radius=6, height=600, map_style="open-street-map", center=center_us 
-            )
-            
-        fig_map.update_layout(margin={"r":0,"t":40,"l":0,"b":0}, uirevision="map")
+            fig_map1 = px.density_map(map_data, lat='Start_Lat', lon='Start_Lng', z='Severity', radius=6, height=550, map_style="open-street-map", center=center_us)
+        fig_map1.update_layout(margin={"r":0,"t":40,"l":0,"b":0}, uirevision="map1")
 
-        return (
-            fig_trend, fig_day, fig_hour_sun, fig_weather,
-            fig_sev, fig_city, fig_infra, fig_map
-        )
+        return fig_map1, fig_trend, fig_day, fig_day_month, fig_hour_sun, fig_duration, fig_weather, fig_sev, fig_city, fig_infra, fig_humidity, fig_visibility, fig_precip
 
     except Exception as e:
-        print("🔥 CALLBACK ERROR:", e)
-        empty_fig = px.scatter(title="Error")
-        return (empty_fig,) * 8
+        print(" CALLBACK ERROR:", e)
+        err = px.scatter(title="Error processing data")
+        return (err,) * 13
 
-# =========================================
-# RUN
-# =========================================
 if __name__ == "__main__":
     app.run(debug=True)
